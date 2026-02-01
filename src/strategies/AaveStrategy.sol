@@ -31,7 +31,7 @@ contract AaveStrategy is IStrategy {
     error AaveStrategy__DepositFailed();
 
     /**
-     * @notice Error cuando el withdraw de Aave falla
+     * @notice Error cuando el retiro de Aave falla
      */
     error AaveStrategy__WithdrawFailed();
 

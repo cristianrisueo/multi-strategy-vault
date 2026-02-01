@@ -46,7 +46,7 @@ interface IStrategy {
     //* Funciones de consulta
 
     /**
-     * @notice Retorna el valor total de assets bajo gestion
+     * @notice Devuelve el valor total de assets bajo gestion
      * @dev Incluye WETH depositado + yield acumulado
      * @dev Como el WETH estará depositado en el protocolo X, se calculará
      *      usando los shares (x-token) recibidos del protocolo subyacente
@@ -55,20 +55,20 @@ interface IStrategy {
     function totalAssets() external view returns (uint256 total);
 
     /**
-     * @notice Retorna el APY actual del protocolo
+     * @notice Devuelve el APY actual del protocolo
      * @dev En basis points: 100 = 1%, 350 = 3.5%, 1000 = 10%
      * @return apyBasisPoints APY en basis points
      */
     function apy() external view returns (uint256 apyBasisPoints);
 
     /**
-     * @notice Retorna el nombre de la strategy
+     * @notice Devuelve el nombre de la strategy
      * @return strategyName Ej: "Aave v3 WETH Strategy"
      */
     function name() external view returns (string memory strategyName);
 
     /**
-     * @notice Retorna la direccion del asset que maneja (actualmente solo WETH)
+     * @notice Devuelve la direccion del asset que maneja (actualmente solo WETH)
      * @return assetAddress Direccion del token (WETH en nuestro caso)
      */
     function asset() external view returns (address assetAddress);

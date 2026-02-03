@@ -92,10 +92,37 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
      */
     event MinDepositUpdated(uint256 old_min, uint256 new_min);
 
+    /**
+     * @notice Emitido cuando se actualiza el withdrawal fee
+     * @param old_withdrawal_fee Anterior fee de retiro
+     * @param new_withdrawal_fee Nuevo fee de retiro
+     */
+    event WithdrawalFeeUpdated(uint256 indexed old_withdrawal_fee, uint256 indexed new_withdrawal_fee);
+
+    /**
+     * @notice Emitido cuando se actualiza el address del fee receiver
+     * @param old_fee_receiver Address del anterior fee receiver
+     * @param new_fee_receiver Address del nuevo fee receiver
+     */
+    event FeeReceiverUpdated(address indexed old_fee_receiver, address indexed new_fee_receiver);
+
+    /**
+     * @notice Emitido cuando se reciben fees tras hacer withdraw un usuario
+     * @param fee_receiver Address del fee receiver
+     * @param fee_amount Cantidad recibida
+     */
+    event FeeCollected(address indexed fee_receiver, uint256 fee_amount);
+
     //* Variables de estado
 
     /// @notice Instancia del StrategyManager que gestiona las estrategias
     StrategyManager public immutable strategy_manager;
+
+    /// @notice Address que recive las protocol fees del 2% por cada retiro
+    address public fee_receiver;
+
+    /// @notice Fee cobrada al retirar los fondos del protocolo en basis points
+    uint256 public withdrawal_fee;
 
     /// @notice Cantidad de WETH idle (pendiente de enviar al manager) acumulado en el vault
     uint256 public idle_weth;
@@ -117,9 +144,10 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
      *      parámetros del vault
      * @param _asset Direccion del token subyacente (WETH)
      * @param _strategy_manager Direccion del StrategyManager
+     * @param _fee_receiver Direccion del receiver de las protocol fees
      * @param _idle_threshold Threshold inicial para auto-allocate (ej: 10 ether)
      */
-    constructor(address _asset, address _strategy_manager, uint256 _idle_threshold)
+    constructor(address _asset, address _strategy_manager, address _fee_receiver, uint256 _idle_threshold)
         ERC4626(IERC20(_asset))
         ERC20("Multi-Strategy Vault WETH", "msvWETH")
         Ownable(msg.sender)
@@ -128,6 +156,8 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
         idle_threshold = _idle_threshold;
         max_tvl = 1000 ether;
         min_deposit = 0.01 ether;
+        fee_receiver = _fee_receiver;
+        withdrawal_fee = 200;
 
         // Aprueba a StrategyManager para mover todo el WETH del vault
         IERC20(_asset).forceApprove(_strategy_manager, type(uint256).max);
@@ -243,10 +273,11 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
         _burn(owner, shares);
 
         // Retira los assets: primero de idle, luego del manager
-        _withdrawAssets(assets, receiver);
+        (uint256 fee, uint256 assets_after_fee) = _withdrawAssets(assets, receiver);
 
-        // Emite evento de assets retirados y devuelve la cantidad
-        emit Withdrawn(receiver, assets, shares);
+        // Emite evento de assets retirados, fees cobradas y devuelve la cantidad neta
+        emit FeeCollected(fee_receiver, fee);
+        emit Withdrawn(receiver, assets_after_fee, shares);
     }
 
     /**
@@ -278,10 +309,11 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
         _burn(owner, shares);
 
         // Retira los assets: primero de idle, luego del manager
-        _withdrawAssets(assets, receiver);
+        (uint256 fee, uint256 assets_after_fee) = _withdrawAssets(assets, receiver);
 
-        // Emite evento de assets retirados y devuelve la cantidad
-        emit Withdrawn(receiver, assets, shares);
+        // Emite evento de assets retirados, fees cobradas y devuelve la cantidad
+        emit FeeCollected(fee_receiver, fee);
+        emit Withdrawn(receiver, assets_after_fee, shares);
     }
 
     //* Funciones internas: allocation y withdrawal
@@ -311,7 +343,10 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
      * @param assets Cantidad de WETH a retirar
      * @param receiver Direccion que recibe los assets
      */
-    function _withdrawAssets(uint256 assets, address receiver) internal {
+    function _withdrawAssets(uint256 assets, address receiver)
+        internal
+        returns (uint256 fee, uint256 assets_after_fee)
+    {
         // Setea la cantidad que se extraerá del idle buffer
         uint256 from_idle = 0;
 
@@ -329,8 +364,13 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
             strategy_manager.withdrawTo(from_manager, address(this));
         }
 
-        // Transfiere WETH al receiver
-        IERC20(asset()).safeTransfer(receiver, assets);
+        // Calcula la fee del protocolo y el neto que recibirá el usuario
+        fee = (assets * withdrawal_fee) / 10000;
+        assets_after_fee = assets - fee;
+
+        // Transfiere WETH neto al receiver y el fee al address del protocolo
+        IERC20(asset()).safeTransfer(fee_receiver, fee);
+        IERC20(asset()).safeTransfer(receiver, assets_after_fee);
     }
 
     //* Funciones para allocation manual
@@ -447,7 +487,27 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
         min_deposit = new_min_deposit;
     }
 
-    //* Funciones de consulta: TVL (sin buffer), buffer pendiente y si se puede transferir el buffer
+    /**
+     * @notice Actualiza el receiver del withdrawal fee
+     * @dev Solo el owner puede llamarla
+     * @param new_fee_receiver Address del nuevo fee receiver
+     */
+    function setWithdrawalFeeReceiver(address new_fee_receiver) external onlyOwner {
+        emit FeeReceiverUpdated(fee_receiver, new_fee_receiver);
+        fee_receiver = new_fee_receiver;
+    }
+
+    /**
+     * @notice Actualiza el fee cobrada al retirar assets
+     * @dev Solo el owner puede llamarla
+     * @param new_withdrawal_fee Nuevo fee en basis points
+     */
+    function setWithdrawalFee(uint256 new_withdrawal_fee) external onlyOwner {
+        emit WithdrawalFeeUpdated(withdrawal_fee, new_withdrawal_fee);
+        withdrawal_fee = new_withdrawal_fee;
+    }
+
+    //* Funciones de consulta de parámetros del protocolo o del usuario dentro del protocolo
 
     /**
      * @notice Devuelve el TVL invertido en estrategias (sin idle)
@@ -471,5 +531,29 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
      */
     function canAllocate() external view returns (bool can_allocate) {
         return idle_weth >= idle_threshold;
+    }
+
+    /**
+     * @notice Devuelve el valor neto que recibe el usuario por las shares que quiere quemar
+     * @dev Override de ERC4626.previewRedeem() para descontar fees
+     * @param shares Cantidad de shares quqe el usuario quiere quemar
+     * @return Assets netos que recibe (-fees)
+     */
+    function previewRedeem(uint256 shares) public view override returns (uint256) {
+        uint256 assets = super.previewRedeem(shares);
+        uint256 fee = (assets * withdrawal_fee) / 10000;
+
+        return assets - fee;
+    }
+
+    /**
+     * @notice Devuelve el valor neto de shares que el usuario quema por los assets a retirar (+fees)
+     * @dev Override de ERC4626.previewRedeem() para descontar fees
+     * @param assets Cantidad de asssets que que el usuario recibe
+     */
+    function previewWithdraw(uint256 assets) public view override returns (uint256) {
+        // Regla de tres: assets es el 98%. Queremos el 100%.
+        uint256 assets_with_fee = (assets * 10000) / (10000 - withdrawal_fee);
+        return super.previewWithdraw(assets_with_fee);
     }
 }

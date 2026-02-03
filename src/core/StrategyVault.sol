@@ -33,6 +33,11 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
     error StrategyVault__ZeroAmount();
 
     /**
+     * @notice Error cuando se intenta depositar menor que el mínimo
+     */
+    error StrategyVault__BelowMinDeposit();
+
+    /**
      * @notice Error cuando el TVL maximo es excedido
      */
     error StrategyVault__MaxTVLExceeded();
@@ -80,6 +85,13 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
      */
     event MaxTVLUpdated(uint256 old_max, uint256 new_max);
 
+    /**
+     * @notice Emitido cuando se actualiza el deposito minimo
+     * @param old_min Deposito minimo anterior
+     * @param new_min Nuevo deposito minimo
+     */
+    event MinDepositUpdated(uint256 old_min, uint256 new_min);
+
     //* Variables de estado
 
     /// @notice Instancia del StrategyManager que gestiona las estrategias
@@ -93,6 +105,9 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
 
     /// @notice TVL maximo permitido en el vault (circuit breaker, mejor no acumular mucho)
     uint256 public max_tvl;
+
+    /// @notice Deposito minimo permitido (anti-spam, anti-rounding attacks)
+    uint256 public min_deposit;
 
     //* Constructor
 
@@ -112,6 +127,7 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
         strategy_manager = StrategyManager(_strategy_manager);
         idle_threshold = _idle_threshold;
         max_tvl = 1000 ether;
+        min_deposit = 0.01 ether;
 
         // Aprueba a StrategyManager para mover todo el WETH del vault
         IERC20(_asset).forceApprove(_strategy_manager, type(uint256).max);
@@ -128,8 +144,8 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
      * @return shares Cantidad de shares mintadas al usuario
      */
     function deposit(uint256 assets, address receiver) public override whenNotPaused returns (uint256 shares) {
-        // Comprueba que no se deposite 0 WETH
-        if (assets == 0) revert StrategyVault__ZeroAmount();
+        // Comprueba que no se deposite por debajo de la cantidad permitida
+        if (assets < min_deposit) revert StrategyVault__BelowMinDeposit();
 
         // Comprueba que no se exceda el max TVL del vault
         if (totalAssets() + assets > max_tvl) {
@@ -170,6 +186,9 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
 
         // Calcula assets necesarios para mintear la cantidad de shares
         assets = previewMint(shares);
+
+        // Comprueba que assets no esté por debajo de la cantidad permitida
+        if (assets < min_deposit) revert StrategyVault__BelowMinDeposit();
 
         // Comprueba que no se exceda el max TVL
         if (totalAssets() + assets > max_tvl) {
@@ -416,6 +435,16 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
     function setMaxTVL(uint256 new_max_tvl) external onlyOwner {
         emit MaxTVLUpdated(max_tvl, new_max_tvl);
         max_tvl = new_max_tvl;
+    }
+
+    /**
+     * @notice Actualiza el deposito minimo
+     * @dev Solo el owner puede llamarla
+     * @param new_min_deposit Nuevo minimo en wei
+     */
+    function setMinDeposit(uint256 new_min_deposit) external onlyOwner {
+        emit MinDepositUpdated(min_deposit, new_min_deposit);
+        min_deposit = new_min_deposit;
     }
 
     //* Funciones de consulta: TVL (sin buffer), buffer pendiente y si se puede transferir el buffer

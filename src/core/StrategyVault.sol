@@ -272,12 +272,16 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
         // Quema las respectivas shares antes de retirar (previene reentrancy)
         _burn(owner, shares);
 
-        // Retira los assets: primero de idle, luego del manager
-        (uint256 fee, uint256 assets_after_fee) = _withdrawAssets(assets, receiver);
+        // Calcula cantidad bruta necesaria (assets + fee) para entregar exactamente 'assets' al usuario
+        uint256 fee = (assets * withdrawal_fee) / (10000 - withdrawal_fee);
+        uint256 gross_amount = assets + fee;
+
+        // Retira el monto bruto: primero de idle, luego del manager
+        _withdrawAssets(gross_amount, receiver, fee);
 
         // Emite evento de assets retirados, fees cobradas y devuelve la cantidad neta
         emit FeeCollected(fee_receiver, fee);
-        emit Withdrawn(receiver, assets_after_fee, shares);
+        emit Withdrawn(receiver, assets, shares);
     }
 
     /**
@@ -297,7 +301,7 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
         // Comprueba que no se quemen 0 shares
         if (shares == 0) revert StrategyVault__ZeroAmount();
 
-        // Calcula los assets a retirar a partir de las shares que quiere quemar el usuario
+        // Calcula los assets netos que recibirá el usuario (ya incluye descuento de fee)
         assets = previewRedeem(shares);
 
         // Comprueba allowance del owner si el owner no es el msg.sender
@@ -308,12 +312,18 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
         // Quema las respectivas shares antes de retirar (previene reentrancy)
         _burn(owner, shares);
 
-        // Retira los assets: primero de idle, luego del manager
-        (uint256 fee, uint256 assets_after_fee) = _withdrawAssets(assets, receiver);
+        // Calcula el valor bruto de las shares (sin descuento de fee)
+        uint256 gross_value = super.previewRedeem(shares);
 
-        // Emite evento de assets retirados, fees cobradas y devuelve la cantidad
+        // Calcula la fee a partir del valor bruto
+        uint256 fee = (gross_value * withdrawal_fee) / 10000;
+
+        // Retira el monto bruto: primero de idle, luego del manager
+        _withdrawAssets(gross_value, receiver, fee);
+
+        // Emite evento de assets retirados, fees cobradas y devuelve la cantidad neta
         emit FeeCollected(fee_receiver, fee);
-        emit Withdrawn(receiver, assets_after_fee, shares);
+        emit Withdrawn(receiver, assets, shares);
     }
 
     //* Funciones internas: allocation y withdrawal
@@ -340,37 +350,34 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
     /**
      * @notice Retira assets del vault (primero buffler idle, luego manager)
      * @dev Helper interno usado por withdraw y redeem
-     * @param assets Cantidad de WETH a retirar
-     * @param receiver Direccion que recibe los assets
+     * @param gross_amount Cantidad bruta de WETH a retirar (incluye fee)
+     * @param receiver Direccion que recibe los assets netos
+     * @param fee Fee ya calculada a transferir al fee_receiver
      */
-    function _withdrawAssets(uint256 assets, address receiver)
-        internal
-        returns (uint256 fee, uint256 assets_after_fee)
-    {
+    function _withdrawAssets(uint256 gross_amount, address receiver, uint256 fee) internal {
         // Setea la cantidad que se extraerá del idle buffer
         uint256 from_idle = 0;
 
         // Si el buffer idle tiene WETH calcula cuanto retirar del buffer
         // Dependiendo de la cantidad retira todo el buffler o solo lo que quiere el usuario
         if (idle_weth > 0) {
-            from_idle = assets > idle_weth ? idle_weth : assets;
+            from_idle = gross_amount > idle_weth ? idle_weth : gross_amount;
             idle_weth -= from_idle;
         }
 
         // Calcula cuanto retirar del manager (con un poco de suerte nada)
         // Si hay que retirar algo llama al método del manager para transferir los assets necesarios
-        uint256 from_manager = assets - from_idle;
+        uint256 from_manager = gross_amount - from_idle;
         if (from_manager > 0) {
             strategy_manager.withdrawTo(from_manager, address(this));
         }
 
-        // Calcula la fee del protocolo y el neto que recibirá el usuario
-        fee = (assets * withdrawal_fee) / 10000;
-        assets_after_fee = assets - fee;
+        // Calcula la cantidad neta que recibirá el usuario (bruto - fee)
+        uint256 assets_net = gross_amount - fee;
 
         // Transfiere WETH neto al receiver y el fee al address del protocolo
         IERC20(asset()).safeTransfer(fee_receiver, fee);
-        IERC20(asset()).safeTransfer(receiver, assets_after_fee);
+        IERC20(asset()).safeTransfer(receiver, assets_net);
     }
 
     //* Funciones para allocation manual

@@ -314,6 +314,7 @@ contract StrategyManager is Ownable {
      * @dev Compara profit esperado vs gas cost estimado
      * @dev Estamos recalculando el target allocation pero no podemos
      *      llamar a _calculateTargetAllocation porque modificaríamos el state
+     *      Este método es el llamado por bots, frontends o interacciones directas con contrato
      *
      * @dev Ejemplo de operación:
      *      Estado actual: Aave 70 WETH (5% APY), Compound 30 WETH (6% APY)
@@ -336,55 +337,24 @@ contract StrategyManager is Ownable {
 
         // Obtiene el TVL del protocolo, y si es menor que el minimo, no rebalancea
         uint256 total_tvl = totalAssets();
-
         if (total_tvl < min_tvl_for_rebalance) return false;
 
-        // temp_targets tendrá targets temporales allocations (sin modificar state)
-        // totalAPY el APY actual de todas las estrategias, para calcular el global
-        uint256[] memory temp_targets = new uint256[](strategies.length);
-        uint256 total_apy = 0;
+        // Calcula targets usando funcion compartida
+        uint256[] memory temp_targets = _computeTargets();
 
-        // Suma APYs de todas las estrategias y comprueba que no sea cero
-        for (uint256 i = 0; i < strategies.length; i++) {
-            total_apy += strategies[i].apy();
-        }
+        // Comprueba que al menos un target sea mayor que cero. Es raro, pero puede pasar
+        // si todas las estrategias tienen APY bajo y ninguna alcanza el threshold minimo
+        bool all_zero = true;
 
-        if (total_apy == 0) return false;
-
-        // Itera sobre las estrategias para calcular targets basados en APY y aplica los límites
-        for (uint256 i = 0; i < strategies.length; i++) {
-            // Obtiene el APY de la estrategia i
-            uint256 strategy_apy = strategies[i].apy();
-
-            // Obtiene su target allocation real (sin límites de TVL permitido)
-            uint256 uncapped_target = (strategy_apy * 10000) / total_apy;
-
-            // Si supera el máximo, su target allocation es el máximo
-            if (uncapped_target > max_allocation_per_strategy) {
-                temp_targets[i] = max_allocation_per_strategy;
-            }
-            // Si no llega al mínimo, su target allocation es 0
-            else if (uncapped_target < min_allocation_threshold) {
-                temp_targets[i] = 0;
-            }
-            // Si está entre el máximo y el mínimo, se queda con el calculado
-            else {
-                temp_targets[i] = uncapped_target;
+        for (uint256 i = 0; i < temp_targets.length; i++) {
+            if (temp_targets[i] > 0) {
+                all_zero = false;
+                break;
             }
         }
 
-        // total_targets contiene los targets normalizados para que sumen 100% (10000)
-        uint256 total_targets = 0;
-        for (uint256 i = 0; i < strategies.length; i++) {
-            total_targets += temp_targets[i];
-        }
-
-        // Si la suma es mayor que cero pero no suma 100% redistribuye de nuevo
-        if (total_targets > 0 && total_targets != 10000) {
-            for (uint256 i = 0; i < strategies.length; i++) {
-                temp_targets[i] = (temp_targets[i] * 10000) / total_targets;
-            }
-        }
+        // Si todos los target allocations son cero no se puede rebalancear (¿protocolo roto?)
+        if (all_zero) return false;
 
         // Calcula profit esperado aproximado anual y numero de movimientos necesarios
         uint256 expected_annual_profit = 0;
@@ -584,69 +554,93 @@ contract StrategyManager is Ownable {
     //* Funciones internas usadas por el resto de métodos del contrato
 
     /**
-     * @notice Calcula target allocation para cada estrategia basado en APY
-     * @dev Usa weighted allocation: mayor APY = mayor porcentaje
+     * @notice Calcula targets de allocation para cada estrategia basado en APY
+     *         Rercuerdo: Target allocation = % del TVL que va a cada estrategia
+     * @dev Helper interno usado por shouldRebalance y _calculateTargetAllocation
+     * @dev Aplica caps (max 50%, min 10%) y normaliza para que sume 100%
+     * @return targets Array con allocation en basis points por estrategia
+     */
+    function _computeTargets() internal view returns (uint256[] memory targets) {
+        // Si no hay estrategias devuelve array vacio
+        if (strategies.length == 0) {
+            return new uint256[](0);
+        }
+
+        // Si hay estratias crea array para los targets calculados del tamaño de las estrategias
+        targets = new uint256[](strategies.length);
+
+        // Suma los APYs de todas las estrategias activas
+        uint256 total_apy = 0;
+
+        for (uint256 i = 0; i < strategies.length; i++) {
+            total_apy += strategies[i].apy();
+        }
+
+        // Si no hay APY (imagina que todas en 0%), distribuye equitativamente el TVL y retorna
+        if (total_apy == 0) {
+            uint256 equal_share = 10000 / strategies.length;
+
+            for (uint256 i = 0; i < strategies.length; i++) {
+                targets[i] = equal_share;
+            }
+
+            return targets;
+        }
+
+        // Este es el escenario normal. Calcula targets basados en APY y aplica caps
+        for (uint256 i = 0; i < strategies.length; i++) {
+            // Obtiene el APY de la estrategia, y calcula su target sin límites
+            uint256 strategy_apy = strategies[i].apy();
+            uint256 uncapped_target = (strategy_apy * 10000) / total_apy;
+
+            // Si supera el maximo, su target allocation es el maximo
+            if (uncapped_target > max_allocation_per_strategy) {
+                targets[i] = max_allocation_per_strategy;
+            }
+            // Si no llega al minimo, su target allocation es 0
+            else if (uncapped_target < min_allocation_threshold) {
+                targets[i] = 0;
+            }
+            // Si esta entre el maximo y el minimo, se queda con el calculado
+            else {
+                targets[i] = uncapped_target;
+            }
+        }
+
+        // Normaliza targets para que sumen exactamente 10000 (100%)
+        uint256 total_targets = 0;
+        for (uint256 i = 0; i < strategies.length; i++) {
+            total_targets += targets[i];
+        }
+
+        // Si no suman 10000, redistribuye proporcionalmente
+        if (total_targets > 0 && total_targets != 10000) {
+            for (uint256 i = 0; i < strategies.length; i++) {
+                targets[i] = (targets[i] * 10000) / total_targets;
+            }
+        }
+
+        // Devuelve array de targets calculados
+        return targets;
+    }
+
+    /**
+     * @notice Calcula el target allocation para cada estrategia basado en APY
+     *         Rercuerdo: Target allocation = % del TVL que va a cada estrategia
+     * @dev Usa weighted allocation para repartir TVL: mayor APY = mayor porcentaje
+     *      Esta es la función que usan el resto de métodos de lógica principal del contrato
      * @dev Aplica límites, max 50%, min 10% (por si lo oyes límites = caps)
      */
     function _calculateTargetAllocation() internal {
         // Si no existen estrategias retorna
         if (strategies.length == 0) return;
 
-        // Suma APYs de todas las estrategias activas
-        uint256 total_apy = 0;
+        // Calcula targets usando funcion interna
+        uint256[] memory computed_allocations = _computeTargets();
+
+        // Escribe los targets calculados al storage (el mapping)
         for (uint256 i = 0; i < strategies.length; i++) {
-            total_apy += strategies[i].apy();
-        }
-
-        // Si no hay APY (todas en 0%), distribuye equitativamente. 100% / num estrategias
-        if (total_apy == 0) {
-            uint256 equal_share = 10000 / strategies.length;
-
-            for (uint256 i = 0; i < strategies.length; i++) {
-                target_allocation[strategies[i]] = equal_share;
-            }
-
-            emit TargetAllocationsUpdated();
-            return;
-        }
-
-        // En un caso normal, las estrategias tienen APY y la suma > 0
-        // distribuye el TVL en función del APY que retorna cada estrategia
-        for (uint256 i = 0; i < strategies.length; i++) {
-            // Itera sobre las estrategias y obtiene el apy de cada una (i)
-            IStrategy strategy = strategies[i];
-            uint256 strategy_apy = strategy.apy();
-
-            // Calcula porcentaje a recibir sin límites
-            uint256 uncapped_target = (strategy_apy * 10000) / total_apy;
-
-            // Si supera el máximo, su target allocation es el máximo
-            if (uncapped_target > max_allocation_per_strategy) {
-                target_allocation[strategy] = max_allocation_per_strategy;
-            }
-            // Si no llega al mínimo, su target allocation es 0
-            else if (uncapped_target < min_allocation_threshold) {
-                target_allocation[strategy] = 0;
-            }
-            // Si está entre el máximo y el mínimo, se queda con el calculado
-            else {
-                target_allocation[strategy] = uncapped_target;
-            }
-        }
-
-        // Comprueba que los target allocations sumen exactamente 10000 (100%)
-        uint256 total_allocated = 0;
-        for (uint256 i = 0; i < strategies.length; i++) {
-            total_allocated += target_allocation[strategies[i]];
-        }
-
-        // Si no suman 10000 (100%), ese porcentaje perdido se distribuye proporcionalmente entre las estrategias
-        if (total_allocated > 0 && total_allocated != 10000) {
-            for (uint256 i = 0; i < strategies.length; i++) {
-                if (target_allocation[strategies[i]] > 0) {
-                    target_allocation[strategies[i]] = (target_allocation[strategies[i]] * 10000) / total_allocated;
-                }
-            }
+            target_allocation[strategies[i]] = computed_allocations[i];
         }
 
         // Emite evento de targets allocations actualizados

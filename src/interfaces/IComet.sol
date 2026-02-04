@@ -36,10 +36,11 @@ interface IComet {
 
     /**
      * @notice Devuelve el supply rate actual del pool
+     * @dev Compound V3 devuelve uint64 representando rate por segundo (base 1e18)
      * @param utilization Utilizacion actual del pool
      * @return rate Supply rate por segundo (base 1e18)
      */
-    function getSupplyRate(uint256 utilization) external view returns (uint256 rate);
+    function getSupplyRate(uint256 utilization) external view returns (uint64 rate);
 
     /**
      * @notice Devuelve la utilizacion actual del pool

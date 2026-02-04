@@ -133,13 +133,17 @@ contract CompoundStrategy is IStrategy {
      * @return apyBasisPoints APY en basis points (350 = 3.5%)
      */
     function apy() external view returns (uint256 apyBasisPoints) {
-        // Obtiene el supply rate de Compound (rate por segundo en base 1e18)
-        uint256 supply_rate_per_second = compound_comet.getSupplyRate(compound_comet.getUtilization());
+        // Obtiene utilizacion actual del pool
+        uint256 utilization = compound_comet.getUtilization();
+
+        // Obtiene supply rate basado en utilizacion (Compound V3 devuelve uint64)
+        uint64 supply_rate_per_second = compound_comet.getSupplyRate(utilization);
 
         // Convierte rate por segundo a APY anual en basis points
+        // Cast a uint256 para evitar overflow en multiplicacion
         // supply_rate * seconds_per_year / 1e18 * 10000 = basis points
         // Simplificado: (rate * 31536000 * 10000) / 1e18
-        apyBasisPoints = (supply_rate_per_second * 315360000000) / 1e18;
+        apyBasisPoints = (uint256(supply_rate_per_second) * 315360000000) / 1e18;
     }
 
     /**
@@ -163,10 +167,10 @@ contract CompoundStrategy is IStrategy {
     /**
      * @notice Devuelve el supply rate actual de Compound
      * @dev Util para debugging y verificacion de APY
-     * @return rate Supply rate por segundo (base 1e18)
+     * @return rate Supply rate por segundo (base 1e18) convertido a uint256
      */
     function getSupplyRate() external view returns (uint256 rate) {
-        return compound_comet.getSupplyRate(compound_comet.getUtilization());
+        return uint256(compound_comet.getSupplyRate(compound_comet.getUtilization()));
     }
 
     /**

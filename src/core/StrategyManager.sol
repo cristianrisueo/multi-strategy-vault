@@ -53,6 +53,11 @@ contract StrategyManager is Ownable {
      */
     error StrategyManager__OnlyVault();
 
+    /**
+     * @notice Error cuando se intenta inicializar vault ya inicializado
+     */
+    error StrategyManager__VaultAlreadyInitialized();
+
     //* Eventos
 
     /**
@@ -91,7 +96,7 @@ contract StrategyManager is Ownable {
     //* Variables de estado
 
     /// @notice Direccion del vault autorizado para llamar allocate/withdraw
-    address public immutable vault;
+    address public vault;
 
     /// @notice Array de estrategias disponibles
     IStrategy[] public strategies;
@@ -130,17 +135,29 @@ contract StrategyManager is Ownable {
         _;
     }
 
-    //* Constructor
+    //* Constructor y función de inicialización (no es fact.pattern pero la necesitamos)
 
     /**
      * @notice Constructor del StrategyManager
-     * @dev Inicializa con las direcciones del vault y asset
-     * @param _vault Direccion del StrategyVault
+     * @dev Inicializa con la dirección del asset
      * @param _asset Direccion del asset (WETH)
      */
-    constructor(address _vault, address _asset) Ownable(msg.sender) {
-        vault = _vault;
+    constructor(address _asset) Ownable(msg.sender) {
         asset = _asset;
+    }
+
+    /**
+     * @notice Inicializa el vault (solo si aun no esta seteado)
+     * @dev Resuelve el problema de dependencias ciruculares en deployment y testing
+     *      Vault necesita dirección de manager y manager necesita dirección de vault
+     *      En constructor de manager ya no seteamos el address vault, y una vez que tengamos
+     *      ambos contratos desplegados actualizamos el manager con el address del vault
+     * @dev Solo puede llamarse una vez, cuando vault == address(0)
+     * @param _vault Direccion del StrategyVault
+     */
+    function initializeVault(address _vault) external onlyOwner {
+        if (vault != address(0)) revert StrategyManager__VaultAlreadyInitialized();
+        vault = _vault;
     }
 
     //* Lógica de negocio principal: Depósitos, retiros y rebalances

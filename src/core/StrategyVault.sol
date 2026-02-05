@@ -174,6 +174,9 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
      * @return shares Cantidad de shares mintadas al usuario
      */
     function deposit(uint256 assets, address receiver) public override whenNotPaused returns (uint256 shares) {
+        // Comprueba que no se deposite cantidad cero
+        if (assets == 0) revert StrategyVault__ZeroAmount();
+
         // Comprueba que no se deposite por debajo de la cantidad permitida
         if (assets < min_deposit) revert StrategyVault__BelowMinDeposit();
 
@@ -304,6 +307,9 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
         // Calcula los assets netos que recibirá el usuario (ya incluye descuento de fee)
         assets = previewRedeem(shares);
 
+        // Calcula el valor bruto de las shares ANTES de quemar (importante!)
+        uint256 gross_value = super.previewRedeem(shares);
+
         // Comprueba allowance del owner si el owner no es el msg.sender
         if (msg.sender != owner) {
             _spendAllowance(owner, msg.sender, shares);
@@ -311,9 +317,6 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
 
         // Quema las respectivas shares antes de retirar (previene reentrancy)
         _burn(owner, shares);
-
-        // Calcula el valor bruto de las shares (sin descuento de fee)
-        uint256 gross_value = super.previewRedeem(shares);
 
         // Calcula la fee a partir del valor bruto
         uint256 fee = (gross_value * withdrawal_fee) / 10000;
@@ -428,6 +431,17 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
 
         // Devuelve la diferencia entre max y actual, es decir, lo que aún se puede
         return max_tvl - current_tvl;
+    }
+
+    /**
+     * @notice Maximo de shares que se pueden mintear
+     * @dev Respeta el max TVL del vault. Usa maxDeposit para obtener assets disponibles
+     *      y convierte a shares. Esto garantiza que respetamos el max_tvl
+     * @param receiver Direccion que recibira las shares
+     * @return max_mint Cantidad maxima de shares que se pueden mintear
+     */
+    function maxMint(address receiver) public view override returns (uint256 max_mint) {
+        return convertToShares(maxDeposit(receiver));
     }
 
     /**

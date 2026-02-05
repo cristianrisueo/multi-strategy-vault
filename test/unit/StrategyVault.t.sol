@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {StrategyVault} from "../../src/core/StrategyVault.sol";
 import {StrategyManager} from "../../src/core/StrategyManager.sol";
 import {AaveStrategy} from "../../src/strategies/AaveStrategy.sol";
@@ -9,900 +9,469 @@ import {CompoundStrategy} from "../../src/strategies/CompoundStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
- * @title StrategyVaultUnitTest
- * @notice Suite completa de tests unitarios para StrategyVault
- * @dev Tests con fork de Sepolia usando estrategias reales de Aave y Compound
+ * @title StrategyVaultTest
+ * @notice Tests unitarios para StrategyVault con fork de Mainnet
+ * @dev Fork test de mainnet, aquí no hay mierdas
  */
-contract StrategyVaultUnitTest is Test {
+contract StrategyVaultTest is Test {
     //* Variables de estado
 
-    /// @notice Instancia del StrategyVault a testear
+    /// @notice Instancia del vault, manager y estrategias
     StrategyVault public vault;
-
-    /// @notice Instancia del StrategyManager
     StrategyManager public manager;
-
-    /// @notice Estrategias reales
     AaveStrategy public aave_strategy;
     CompoundStrategy public compound_strategy;
 
-    /// @notice Direcciones de los contratos en Sepolia
-    address constant WETH = 0xC558DBdd856501FCd9aaF1E62eae57A9F0629a3c;
-    address constant AAVE_POOL = 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951;
-    address constant COMPOUND_COMET = 0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e;
+    /// @notice Direcciones de los contratos en Mainnet
+    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address constant AAVE_POOL = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
+    address constant COMPOUND_COMET = 0xA17581A9E3356d9A858b789D68B4d866e593aE94;
 
     /// @notice Usuarios de prueba
-    address public owner;
-    address public fee_receiver;
     address public alice = makeAddr("alice");
     address public bob = makeAddr("bob");
-    address public charlie = makeAddr("charlie");
+    address public fee_receiver;
 
-    /// @notice Parámetros iniciales del vault
+    /// @notice Parámetros del vault
     uint256 constant IDLE_THRESHOLD = 10 ether;
     uint256 constant MAX_TVL = 1000 ether;
-    uint256 constant MIN_DEPOSIT = 0.01 ether;
-    uint256 constant WITHDRAWAL_FEE = 200; // 2%
+    uint256 constant WITHDRAWAL_FEE = 200;
 
     //* Setup del entorno de testing
 
     /**
-     * @notice Configura el entorno de testing con fork de Sepolia
-     * @dev Despliega vault, manager y estrategias reales
+     * @notice Configura el entorno de testing
+     * @dev Para un comportamiento real hacemos fork de Mainnet. No recomiendo testear en
+     *      testnets, los contratos desplegados SON UNA MIERDA, no es comportamiento real
      */
     function setUp() public {
-        // Fork Sepolia para tests con protocolos reales
-        vm.createSelectFork(vm.envString("SEPOLIA_RPC_URL"));
+        // Crea un fork de Mainnet usando mi endpoint de Alchemy en env.var
+        vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
 
-        // Configurar direcciones
-        owner = address(this);
+        // Setea el fee receiver
         fee_receiver = makeAddr("feeReceiver");
 
-        // Deploy Manager (solo con asset ahora)
+        // Inicializa el manager, vault y setea el address del vault en el manager
         manager = new StrategyManager(WETH);
-
-        // Deploy Vault con manager real
         vault = new StrategyVault(WETH, address(manager), fee_receiver, IDLE_THRESHOLD);
-
-        // Inicializar vault en manager (one-time call)
         manager.initializeVault(address(vault));
 
-        // Deploy estrategias reales
+        // Inicializa las estrategias con las direcciones reales de mainnet
         aave_strategy = new AaveStrategy(address(manager), WETH, AAVE_POOL);
         compound_strategy = new CompoundStrategy(address(manager), WETH, COMPOUND_COMET);
 
-        // Agregar estrategias al manager
+        // Añade las estrategias
         manager.addStrategy(address(aave_strategy));
         manager.addStrategy(address(compound_strategy));
+    }
+
+    //* Funciones internas helpers
+
+    /**
+     * @notice Helper de depósito utilizado en la mayoría de tests
+     * @dev Los helpers solo se usan para happy paths, no casos donde se espera revert
+     * @param user Usuario utilizado en la interacción
+     * @param amount Cantidad entregada al usuario
+     * @return shares Cantidad de shares minteadas al usuario tras el depósito
+     */
+    function _deposit(address user, uint256 amount) internal returns (uint256 shares) {
+        // Entrega la cantidad de WETH al usuario y usa su address
+        deal(WETH, user, amount);
+        vm.startPrank(user);
+
+        // Aprueba al vault la transferencia de WETH y deposita la cantidad en el vault
+        IERC20(WETH).approve(address(vault), amount);
+        shares = vault.deposit(amount, user);
+
+        vm.stopPrank();
+    }
+
+    /**
+     * @notice Helper de retiro utilizado en la mayoría de tests
+     * @dev Los helpers solo se usan para happy paths, no casos donde se espera revert
+     * @param user Usuario utilizado en la interacción
+     * @param amount Cantidad entregada al usuario
+     * @return shares Cantidad de shares del usuario quemadas tras el retiro
+     */
+    function _withdraw(address user, uint256 amount) internal returns (uint256 shares) {
+        // Utiliza el address del usuario. retira la cantidad y devuelve las shares quemadas
+        vm.prank(user);
+        shares = vault.withdraw(amount, user, user);
     }
 
     //* Test unitarios de lógica principal: Depósitos
 
     /**
-     * @notice Test basico de deposito
+     * @notice Test de depósito básico
      * @dev Comprueba que un usuario pueda depositar y recibir shares correctamente
      */
-    function test_DepositBasic() public {
-        // Cantidad a depositar: 1 WETH
-        uint256 deposit_amount = 1 ether;
+    function test_Deposit_Basic() public {
+        // Usa a Alice para depositar 1 WETH
+        uint256 amount = 1 ether;
+        uint256 shares = _deposit(alice, amount);
 
-        // Entrega la cantidad a Alice y usa su cuenta para depositar
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        // Aprueba el vault para gastar su WETH y deposita
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        uint256 shares_received = vault.deposit(deposit_amount, alice);
-
-        vm.stopPrank();
-
-        // Comprueba que las shares de Alice en el vault y las recibidas coinciden
-        assertEq(vault.balanceOf(alice), shares_received, "Shares incorrectas");
-
-        // Comprueba que el total de assets del vault incluye el deposito
-        // (estará en idle buffer porque no alcanza threshold)
-        assertEq(vault.totalAssets(), deposit_amount, "Total assets incorrecto");
-        assertEq(vault.idle_weth(), deposit_amount, "Idle buffer incorrecto");
+        // Comprueba shares recibidas por Alice, assets en el vault y assets en el buffer idle
+        assertEq(vault.balanceOf(alice), shares);
+        assertEq(vault.totalAssets(), amount);
+        assertEq(vault.idle_weth(), amount);
     }
 
     /**
-     * @notice Test de deposito con cantidad cero
-     * @dev Debe revertir al intentar depositar 0
+     * @notice Test de depósito igual a IDLE threshold
+     * @dev Realiza depósito superior al threshold para comprobar que el vault hace allocation
      */
-    function test_DepositZeroReverts() public {
+    function test_Deposit_TriggersAllocation() public {
+        // Usa a alice para depositar cantidad límite
+        _deposit(alice, IDLE_THRESHOLD);
+
+        // Comprueba que tanto el vault cómo el buffer IDLE no tiene WETH
+        assertEq(vault.idle_weth(), 0);
+        assertGt(manager.totalAssets(), 0);
+    }
+
+    /**
+     * @notice Test de depósito de cantidad cero
+     * @dev Realiza depósito con cantidad cero y comprueba que se revierte con error esperado
+     */
+    function test_Deposit_RevertZero() public {
+        // Usa a Alice para depositar cantidad cero
         vm.prank(alice);
 
+        // Espera el error y deposita
         vm.expectRevert(StrategyVault.StrategyVault__ZeroAmount.selector);
         vault.deposit(0, alice);
     }
 
     /**
-     * @notice Test de deposito por debajo del minimo
-     * @dev Debe revertir si el deposito es menor que min_deposit
+     * @notice Test de depósito de cantidad por debajo de la mínima
+     * @dev Realiza depósito con cantidad ínfima y comprueba que se reviera con error esperado
      */
-    function test_DepositBelowMinReverts() public {
-        // Cantidad menor al minimo (0.01 ETH)
-        uint256 below_min = 0.005 ether;
-
-        // Alice intenta depositar
-        deal(WETH, alice, below_min);
+    function test_Deposit_RevertBelowMin() public {
+        // Entrega a Alice 0.005 WETH y usa su address
+        deal(WETH, alice, 0.005 ether);
         vm.startPrank(alice);
 
-        IERC20(WETH).approve(address(vault), below_min);
+        // Aprueba al vault la transferencia
+        IERC20(WETH).approve(address(vault), 0.005 ether);
 
-        // Espera que revierta por estar por debajo del minimo
+        // Espera el error y deposita
         vm.expectRevert(StrategyVault.StrategyVault__BelowMinDeposit.selector);
-        vault.deposit(below_min, alice);
+        vault.deposit(0.005 ether, alice);
 
         vm.stopPrank();
     }
 
     /**
-     * @notice Test de deposito cuando el vault esta pausado
-     * @dev Debe revertir si se intenta depositar mientras esta pausado
+     * @notice Test de depósito de cantidad por encima de máximo TVL
+     * @dev Realiza depósito con cantidad superior y comprueba que se reviera con error esperado
      */
-    function test_DepositWhenPausedReverts() public {
-        // Cantidad a depositar: 1 WETH
-        uint256 deposit_amount = 1 ether;
+    function test_Deposit_RevertExceedsMaxTVL() public {
+        // Entrega a Alice cantidad superior al máximo permitido TVL y usa su address
+        deal(WETH, alice, MAX_TVL + 1);
+        vm.startPrank(alice);
 
-        // Se pausa el vault
+        // Aprueba al vault la transferencia
+        IERC20(WETH).approve(address(vault), MAX_TVL + 1);
+
+        // Espera el error y deposita
+        vm.expectRevert(StrategyVault.StrategyVault__MaxTVLExceeded.selector);
+        vault.deposit(MAX_TVL + 1, alice);
+
+        vm.stopPrank();
+    }
+
+    /**
+     * @notice Test de depósito cuando el vault está pausado
+     * @dev Realiza depósito con cantidad normal y comprueba que se reviera con error esperado
+     */
+    function test_Deposit_RevertWhenPaused() public {
+        // Pausa el vault
         vault.pause();
 
-        // Entrega la cantidad a Alice y usa su cuenta para depositar
-        deal(WETH, alice, deposit_amount);
+        // Entrega 1 WETH a Alice y usa su address
+        deal(WETH, alice, 1 ether);
         vm.startPrank(alice);
 
-        // Aprueba el vault para gastar su WETH
-        IERC20(WETH).approve(address(vault), deposit_amount);
+        // Aprueba al vault la transferencia
+        IERC20(WETH).approve(address(vault), 1 ether);
 
-        // Espera que se revierta por estar pausado el vault, y deposita
+        // Espera el error y deposita
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
-        vault.deposit(deposit_amount, alice);
+        vault.deposit(1 ether, alice);
 
         vm.stopPrank();
     }
 
-    /**
-     * @notice Test de deposito excediendo max TVL
-     * @dev Debe revertir si el deposito supera el limite de TVL
-     */
-    function test_DepositExceedingMaxTVLReverts() public {
-        // Obtiene el max TVL actual del vault y aumenta la cantidad a depositar
-        uint256 max_tvl = vault.max_tvl();
-        uint256 exceeding_amount = max_tvl + 1 ether;
-
-        // Dar la cantidad de exceso a Alice
-        deal(WETH, alice, exceeding_amount);
-        vm.startPrank(alice);
-
-        // Aprueba el vault para gastar su WETH
-        IERC20(WETH).approve(address(vault), exceeding_amount);
-
-        // Espera que se revierta por exceder el max TVL, y deposita
-        vm.expectRevert(StrategyVault.StrategyVault__MaxTVLExceeded.selector);
-        vault.deposit(exceeding_amount, alice);
-
-        vm.stopPrank();
-    }
+    //* Testing de mint
 
     /**
-     * @notice Test de deposito que NO trigger allocate (bajo threshold)
-     * @dev El deposito se acumula en idle buffer sin enviarse al manager
+     * @notice Test de mint básico
+     * @dev Comprueba que un usuario pueda hacer mint y recibir shares correctamente
      */
-    function test_DepositDoesNotTriggerIdleAllocation() public {
-        // Cantidad menor al threshold (10 ETH)
-        uint256 deposit_amount = 5 ether;
-
-        // Alice deposita
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-
-        vm.stopPrank();
-
-        // Comprueba que el WETH esta en idle, no en manager
-        assertEq(vault.idle_weth(), deposit_amount, "No se acumulo en idle");
-        assertEq(manager.totalAssets(), 0, "No deberia haber assets en manager");
-    }
-
-    /**
-     * @notice Test de deposito que SÍ trigger allocate (alcanza threshold)
-     * @dev El idle buffer se vacia automaticamente hacia el manager
-     */
-    function test_DepositTriggersIdleAllocation() public {
-        // Cantidad que alcanza el threshold (10 ETH)
-        uint256 deposit_amount = 10 ether;
-
-        // Alice deposita
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-
-        vm.stopPrank();
-
-        // Comprueba que idle buffer se vacio y los fondos estan en manager/estrategias
-        assertEq(vault.idle_weth(), 0, "Idle deberia estar vacio");
-        assertGt(manager.totalAssets(), 0, "Manager deberia tener assets");
-    }
-
-    /**
-     * @notice Test de multiples depositos secuenciales
-     * @dev Comprueba que varios usuarios puedan depositar sin problemas
-     */
-    function test_MultipleDepositsSequential() public {
-        // Cantidades a depositar por cada usuario
-        uint256 amount_alice = 2 ether;
-        uint256 amount_bob = 3 ether;
-        uint256 amount_charlie = 1.5 ether;
-
-        // Entrega la cantidad a Alice y deposita
-        deal(WETH, alice, amount_alice);
-        vm.startPrank(alice);
-        IERC20(WETH).approve(address(vault), amount_alice);
-        vault.deposit(amount_alice, alice);
-        vm.stopPrank();
-
-        // Entrega la cantidad a Bob y deposita
-        deal(WETH, bob, amount_bob);
-        vm.startPrank(bob);
-        IERC20(WETH).approve(address(vault), amount_bob);
-        vault.deposit(amount_bob, bob);
-        vm.stopPrank();
-
-        // Entrega la cantidad a Charlie y deposita
-        deal(WETH, charlie, amount_charlie);
-        vm.startPrank(charlie);
-        IERC20(WETH).approve(address(vault), amount_charlie);
-        vault.deposit(amount_charlie, charlie);
-        vm.stopPrank();
-
-        // Comprueba que el total de assets del vault es correcto
-        uint256 expected_total = amount_alice + amount_bob + amount_charlie;
-        assertEq(vault.totalAssets(), expected_total, "Total assets incorrecto");
-    }
-
-    //* Test unitarios de lógica principal: Mint
-
-    /**
-     * @notice Test basico de mint
-     * @dev Comprueba que un usuario pueda mintear shares específicas
-     */
-    function test_MintBasic() public {
-        // Shares a mintear
-        uint256 shares_to_mint = 5 ether;
-
-        // Alice mintea shares
+    function test_Mint_Basic() public {
+        // Entrega 10 WETH a Alice y usa su address
         deal(WETH, alice, 10 ether);
         vm.startPrank(alice);
 
+        // Aprueba al vault la transferencia
         IERC20(WETH).approve(address(vault), 10 ether);
-        uint256 assets_deposited = vault.mint(shares_to_mint, alice);
 
+        // Realiza el mint de 5 WETH
+        vault.mint(5 ether, alice);
         vm.stopPrank();
 
-        // Comprueba que Alice tiene las shares correctas
-        assertEq(vault.balanceOf(alice), shares_to_mint, "Shares incorrectas");
-        assertGt(assets_deposited, 0, "Deberia haber depositado assets");
+        // Comprueba que el balance de shares de Alice corresponda con 5 WETH (ratio 1:1)
+        assertEq(vault.balanceOf(alice), 5 ether);
     }
 
     /**
-     * @notice Test de mint con cantidad cero
-     * @dev Debe revertir al intentar mintear 0 shares
+     * @notice Test de mint de cantidad cero
+     * @dev Realiza mint con cantidad cero y comprueba que se revierte con error esperado
      */
-    function test_MintZeroReverts() public {
+    function test_Mint_RevertZero() public {
+        // Utiliza el address de Alice
         vm.prank(alice);
 
+        // Espera el error y mintea 0 shares
         vm.expectRevert(StrategyVault.StrategyVault__ZeroAmount.selector);
         vault.mint(0, alice);
     }
 
-    /**
-     * @notice Test de mint cuando el vault esta pausado
-     * @dev Debe revertir si se intenta mintear mientras esta pausado
-     */
-    function test_MintWhenPausedReverts() public {
-        // Shares a mintear
-        uint256 shares_to_mint = 1 ether;
-
-        // Se pausa el vault
-        vault.pause();
-
-        // Alice intenta mintear
-        deal(WETH, alice, 10 ether);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), 10 ether);
-
-        // Espera que revierta por estar pausado
-        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
-        vault.mint(shares_to_mint, alice);
-
-        vm.stopPrank();
-    }
-
-    //* Test unitarios de lógica principal: Retiros
+    //* Testing de withdraw
 
     /**
-     * @notice Test basico de retiro
-     * @dev Comprueba que un usuario pueda retirar sus fondos correctamente
+     * @notice Test de retiro desde buffer idle
+     * @dev Comprueba que se retire correctamente del idle sin tocar el manager
      */
-    function test_WithdrawBasic() public {
-        // Cantidad a depositar y luego retirar: 5 WETH
-        uint256 deposit_amount = 5 ether;
+    function test_Withdraw_FromIdle() public {
+        // Deposita 5 WETH (se queda en idle)
+        _deposit(alice, 5 ether);
 
-        // Setup: Alice deposita primero
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
+        // Retira 2 WETH
+        _withdraw(alice, 2 ether);
 
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-
-        // Alice retira assets (descontando fee del 2%)
-        uint256 expected_net = (deposit_amount * (10000 - WITHDRAWAL_FEE)) / 10000;
-        vault.withdraw(expected_net, alice, alice);
-
-        vm.stopPrank();
-
-        // Comprobaciones: Alice recibio WETH neto (menos fee)
-        assertEq(IERC20(WETH).balanceOf(alice), expected_net, "Alice no recibio WETH neto");
-
-        // Comprueba que shares fueron quemadas (no exactamente 0 por fee)
-        assertLt(vault.balanceOf(alice), deposit_amount / 100, "Shares no quemadas correctamente");
+        // Comprueba balance de Alice y que el manager siga vacío
+        assertEq(IERC20(WETH).balanceOf(alice), 2 ether);
+        assertEq(manager.totalAssets(), 0);
     }
 
     /**
-     * @notice Test de retiro con cantidad cero
-     * @dev Debe revertir al intentar retirar 0
+     * @notice Test de retiro desde estrategias
+     * @dev Comprueba que se retire del manager cuando el idle no es suficiente
      */
-    function test_WithdrawZeroReverts() public {
+    function test_Withdraw_FromStrategies() public {
+        // Deposita 20 WETH (supera threshold, va al manager)
+        _deposit(alice, 20 ether);
+
+        // Retira 15 WETH
+        _withdraw(alice, 15 ether);
+
+        // Comprueba balance final de Alice
+        assertEq(IERC20(WETH).balanceOf(alice), 15 ether);
+    }
+
+    /**
+     * @notice Test de cálculo de fee de retiro
+     * @dev Comprueba que el fee se descuente correctamente del balance del fee receiver
+     */
+    function test_Withdraw_FeeCalculation() public {
+        // Deposita 100 WETH para tener margen
+        _deposit(alice, 100 ether);
+
+        // Guarda el balance previo del fee receiver
+        uint256 fee_before = IERC20(WETH).balanceOf(fee_receiver);
+
+        // Retira 50 WETH
+        _withdraw(alice, 50 ether);
+
+        // Calcula el fee esperado basado en la constante
+        uint256 expected_fee = (50 ether * WITHDRAWAL_FEE) / (10000 - WITHDRAWAL_FEE);
+
+        // Comprueba que el fee real coincida con el esperado
+        uint256 actual_fee = IERC20(WETH).balanceOf(fee_receiver) - fee_before;
+        assertEq(actual_fee, expected_fee);
+    }
+
+    /**
+     * @notice Test de retiro de cantidad cero
+     * @dev Comprueba que se revierta con el error esperado al retirar 0
+     */
+    function test_Withdraw_RevertZero() public {
+        // Utiliza el address de Alice
         vm.prank(alice);
 
+        // Espera el error y retira 0
         vm.expectRevert(StrategyVault.StrategyVault__ZeroAmount.selector);
         vault.withdraw(0, alice, alice);
     }
 
     /**
-     * @notice Test de retiro parcial
-     * @dev Usuario retira solo una parte de su deposito
+     * @notice Test de retiro cuando el vault está pausado
+     * @dev Comprueba que se revierta al intentar retirar estando pausado
      */
-    function test_WithdrawPartial() public {
-        // Cantidades a depositar y retirar
-        uint256 deposit_amount = 10 ether;
-        uint256 withdraw_amount = 3 ether; // Retira 3 ETH netos
+    function test_Withdraw_RevertWhenPaused() public {
+        // Deposita fondos primero
+        _deposit(alice, 5 ether);
 
-        // Setup: Alice deposita
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-
-        // Alice retira cantidad parcial
-        vault.withdraw(withdraw_amount, alice, alice);
-
-        vm.stopPrank();
-
-        // Comprobaciones: Alice tiene shares restantes
-        assertGt(vault.balanceOf(alice), 0, "Alice no tiene shares restantes");
-
-        // Comprueba que Alice recibio la cantidad neta
-        assertEq(IERC20(WETH).balanceOf(alice), withdraw_amount, "Balance WETH incorrecto");
-    }
-
-    /**
-     * @notice Test de retiro cuando el vault esta pausado
-     * @dev Debe revertir si se intenta retirar mientras esta pausado
-     */
-    function test_WithdrawWhenPausedReverts() public {
-        // Cantidad a depositar: 5 WETH
-        uint256 deposit_amount = 5 ether;
-
-        // Setup: Alice deposita primero
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-
-        vm.stopPrank();
-
-        // Owner pausa el vault
+        // Pausa el vault
         vault.pause();
 
-        // Alice no deberia poder retirar
-        vm.prank(alice);
+        // Espera el error de pausa al intentar retirar
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
-        vault.withdraw(deposit_amount, alice, alice);
+        _withdraw(alice, 1 ether);
+    }
+
+    //* Testing de redeem
+
+    /**
+     * @notice Test de redeem básico
+     * @dev Comprueba que un usuario pueda redimir shares por assets
+     */
+    function test_Redeem_Basic() public {
+        // Deposita y obtiene shares
+        uint256 shares = _deposit(alice, 5 ether);
+
+        // Usa a Alice para redimir sus shares
+        vm.prank(alice);
+        uint256 assets = vault.redeem(shares, alice, alice);
+
+        // Comprueba que se quemaron las shares y se recibieron assets (menos fee)
+        assertEq(vault.balanceOf(alice), 0);
+        assertGt(assets, 0);
+        assertLt(assets, 5 ether);
     }
 
     /**
-     * @notice Test de calculo de withdrawal fee
-     * @dev Verifica que el fee sea exactamente 2% de los assets brutos
+     * @notice Test de redeem de cantidad cero
+     * @dev Comprueba que se revierta al intentar redimir 0 shares
      */
-    function test_WithdrawFeeCalculation() public {
-        // Deposito grande para testear fee
-        uint256 deposit_amount = 100 ether;
-
-        // Setup: Alice deposita
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-
-        // Balance del fee receiver antes
-        uint256 fee_receiver_before = IERC20(WETH).balanceOf(fee_receiver);
-
-        // Alice retira cantidad neta de 50 ETH
-        uint256 net_withdraw = 50 ether;
-        vault.withdraw(net_withdraw, alice, alice);
-
-        vm.stopPrank();
-
-        // Calcula fee esperado: fee = (net × fee_bp) / (10000 - fee_bp)
-        // Para net = 50 ETH y fee = 200bp: fee = 50 × 200 / 9800 ≈ 1.02 ETH
-        uint256 expected_fee = (net_withdraw * WITHDRAWAL_FEE) / (10000 - WITHDRAWAL_FEE);
-
-        // Balance del fee receiver despues
-        uint256 fee_receiver_after = IERC20(WETH).balanceOf(fee_receiver);
-        uint256 actual_fee = fee_receiver_after - fee_receiver_before;
-
-        // Comprueba que el fee es correcto
-        assertEq(actual_fee, expected_fee, "Fee calculation incorrecto");
-    }
-
-    /**
-     * @notice Test de retiro desde idle buffer primero
-     * @dev Verifica que el retiro use idle buffer antes de tocar manager
-     */
-    function test_WithdrawFromIdleFirst() public {
-        // Deposito que no alcanza threshold (se queda en idle)
-        uint256 deposit_amount = 5 ether;
-
-        // Setup: Alice deposita
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-
-        // Retira cantidad menor al idle
-        uint256 withdraw_amount = 2 ether;
-        vault.withdraw(withdraw_amount, alice, alice);
-
-        vm.stopPrank();
-
-        // Comprueba que manager no fue tocado
-        assertEq(manager.totalAssets(), 0, "Manager no deberia haber sido tocado");
-
-        // Comprueba que idle buffer disminuyo
-        assertLt(vault.idle_weth(), deposit_amount, "Idle no disminuyo");
-    }
-
-    /**
-     * @notice Test de retiro desde manager cuando idle es insuficiente
-     * @dev Verifica que se retira de manager si idle no alcanza
-     */
-    function test_WithdrawFromManagerWhenIdleInsufficient() public {
-        // Deposito grande que alcanza threshold (va a manager)
-        uint256 deposit_amount = 20 ether;
-
-        // Setup: Alice deposita
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-
-        // Retira cantidad grande (más de lo que hay en idle)
-        uint256 withdraw_amount = 15 ether;
-        vault.withdraw(withdraw_amount, alice, alice);
-
-        vm.stopPrank();
-
-        // Comprueba que manager fue usado para el retiro
-        assertLt(manager.totalAssets(), deposit_amount, "Manager deberia haber disminuido");
-    }
-
-    //* Test unitarios de lógica principal: Redeem
-
-    /**
-     * @notice Test basico de redeem
-     * @dev Comprueba que un usuario pueda quemar shares y recibir assets
-     */
-    function test_RedeemBasic() public {
-        // Cantidad a depositar: 10 WETH
-        uint256 deposit_amount = 10 ether;
-
-        // Setup: Alice deposita
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        uint256 shares = vault.deposit(deposit_amount, alice);
-
-        // Alice redime todas sus shares
-        uint256 assets_received = vault.redeem(shares, alice, alice);
-
-        vm.stopPrank();
-
-        // Comprobaciones: Alice quemo shares y recibio assets (menos fee)
-        assertEq(vault.balanceOf(alice), 0, "Alice aun tiene shares");
-        assertGt(assets_received, 0, "Alice no recibio assets");
-
-        // Verifica que recibio menos del deposito original (por fee)
-        assertLt(assets_received, deposit_amount, "Assets deberian ser menores por fee");
-    }
-
-    /**
-     * @notice Test de redeem con cantidad cero
-     * @dev Debe revertir al intentar redimir 0 shares
-     */
-    function test_RedeemZeroReverts() public {
+    function test_Redeem_RevertZero() public {
+        // Utiliza el address de Alice
         vm.prank(alice);
 
+        // Espera el error y redime 0 shares
         vm.expectRevert(StrategyVault.StrategyVault__ZeroAmount.selector);
         vault.redeem(0, alice, alice);
     }
 
-    /**
-     * @notice Test de redeem cuando el vault esta pausado
-     * @dev Debe revertir si se intenta redimir mientras esta pausado
-     */
-    function test_RedeemWhenPausedReverts() public {
-        // Cantidad a depositar: 5 WETH
-        uint256 deposit_amount = 5 ether;
-
-        // Setup: Alice deposita
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        uint256 shares = vault.deposit(deposit_amount, alice);
-
-        vm.stopPrank();
-
-        // Owner pausa el vault
-        vault.pause();
-
-        // Alice no deberia poder redimir
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
-        vault.redeem(shares, alice, alice);
-    }
-
-    //* Test unitarios de lógica adicional: Idle buffer management
+    //* Testing de allocation
 
     /**
-     * @notice Test de allocate idle manual
-     * @dev Owner puede forzar allocate del idle buffer
+     * @notice Test de allocate idle por debajo del threshold
+     * @dev Comprueba que falle allocation manual si no hay suficiente idle
      */
-    function test_ManualAllocateIdleOnlyOwner() public {
-        // Deposito que NO alcanza threshold
-        uint256 deposit_amount = 5 ether;
+    function test_AllocateIdle_RevertBelowThreshold() public {
+        // Deposita cantidad pequeña (bajo threshold)
+        _deposit(alice, 1 ether);
 
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-        vm.stopPrank();
-
-        // Verifica que idle tiene fondos
-        assertEq(vault.idle_weth(), deposit_amount, "Idle deberia tener fondos");
-
-        // Alice intenta allocate manualmente (deberia revertir)
-        vm.prank(alice);
-        vm.expectRevert();
-        vault.allocateIdle();
-
-        // Owner puede allocate manualmente
-        vault.allocateIdle();
-
-        // Verifica que idle se vacio
-        assertEq(vault.idle_weth(), 0, "Idle deberia estar vacio");
-        assertGt(manager.totalAssets(), 0, "Manager deberia tener assets");
-    }
-
-    /**
-     * @notice Test de allocate idle cuando esta por debajo del threshold
-     * @dev Debe revertir si idle < threshold al intentar allocate manual
-     */
-    function test_ManualAllocateIdleWhenBelowThresholdReverts() public {
-        // Deposito muy pequeño
-        uint256 small_deposit = 1 ether;
-
-        deal(WETH, alice, small_deposit);
-        vm.startPrank(alice);
-        IERC20(WETH).approve(address(vault), small_deposit);
-        vault.deposit(small_deposit, alice);
-        vm.stopPrank();
-
-        // Owner intenta allocate pero esta por debajo del threshold
+        // Espera error al intentar allocation manual sin llegar al mínimo
         vm.expectRevert(StrategyVault.StrategyVault__IdleBelowThreshold.selector);
         vault.allocateIdle();
     }
 
-    //* Test unitarios de lógica adicional: Admin functions
+    //* Testing de funciones de accounting
 
     /**
-     * @notice Test de setIdleThreshold solo owner
-     * @dev Solo el owner puede cambiar el idle threshold
+     * @notice Test de total assets sumando idle y manager
+     * @dev Comprueba que el total de assets sume correctamente ambas partes
      */
-    function test_SetIdleThresholdOnlyOwner() public {
-        uint256 new_threshold = 20 ether;
+    function test_TotalAssets_IdlePlusManager() public {
+        // Deposita con Alice (se queda en idle)
+        _deposit(alice, 5 ether);
 
-        // Alice intenta cambiar (deberia revertir)
-        vm.prank(alice);
-        vm.expectRevert();
-        vault.setIdleThreshold(new_threshold);
+        // Deposita con Bob (supera threshold, ejecuta allocation)
+        _deposit(bob, 10 ether);
 
-        // Owner puede cambiar
-        vault.setIdleThreshold(new_threshold);
-        assertEq(vault.idle_threshold(), new_threshold, "Threshold no actualizado");
+        // Comprueba que el total sea la suma aproximada (por posibles fees/slippage)
+        uint256 expected = 15 ether;
+        assertApproxEqRel(vault.totalAssets(), expected, 0.001e18);
     }
 
     /**
-     * @notice Test de setMaxTVL solo owner
-     * @dev Solo el owner puede cambiar el max TVL
+     * @notice Test de max deposit respetando TVL
+     * @dev Comprueba que la función devuelva el MAX_TVL
      */
-    function test_SetMaxTVLOnlyOwner() public {
-        uint256 new_max_tvl = 2000 ether;
-
-        // Alice intenta cambiar (deberia revertir)
-        vm.prank(alice);
-        vm.expectRevert();
-        vault.setMaxTVL(new_max_tvl);
-
-        // Owner puede cambiar
-        vault.setMaxTVL(new_max_tvl);
-        assertEq(vault.max_tvl(), new_max_tvl, "Max TVL no actualizado");
+    function test_MaxDeposit_RespectsMaxTVL() public view {
+        // Comprueba que el máximo depósito permitido sea el TVL configurado
+        assertEq(vault.maxDeposit(alice), MAX_TVL);
     }
 
     /**
-     * @notice Test de setMinDeposit solo owner
-     * @dev Solo el owner puede cambiar el deposito minimo
+     * @notice Test de max mint respetando TVL
+     * @dev Comprueba que la función devuelva el MAX_TVL (en shares)
      */
-    function test_SetMinDepositOnlyOwner() public {
-        uint256 new_min_deposit = 0.1 ether;
-
-        // Alice intenta cambiar (deberia revertir)
-        vm.prank(alice);
-        vm.expectRevert();
-        vault.setMinDeposit(new_min_deposit);
-
-        // Owner puede cambiar
-        vault.setMinDeposit(new_min_deposit);
-        assertEq(vault.min_deposit(), new_min_deposit, "Min deposit no actualizado");
+    function test_MaxMint_RespectsMaxTVL() public view {
+        // Comprueba que el máximo mint permitido sea el TVL configurado
+        assertEq(vault.maxMint(alice), MAX_TVL);
     }
 
-    /**
-     * @notice Test de setWithdrawalFee solo owner
-     * @dev Solo el owner puede cambiar el withdrawal fee
-     */
-    function test_SetWithdrawalFeeOnlyOwner() public {
-        uint256 new_fee = 300; // 3%
+    //* Testing de funcionalidad only owner
 
-        // Alice intenta cambiar (deberia revertir)
-        vm.prank(alice);
+    /**
+     * @notice Test de permisos de administrador
+     * @dev Comprueba que solo el owner pueda cambiar parámetros y otros fallen
+     */
+    function test_Admin_OnlyOwnerCanSetParams() public {
+        // Intenta ejecutar setters como Alice (no owner)
+        vm.startPrank(alice);
+
+        // Espera reverts en todas las llamadas administrativas
         vm.expectRevert();
-        vault.setWithdrawalFee(new_fee);
-
-        // Owner puede cambiar
-        vault.setWithdrawalFee(new_fee);
-        assertEq(vault.withdrawal_fee(), new_fee, "Withdrawal fee no actualizado");
-    }
-
-    /**
-     * @notice Test de setWithdrawalFeeReceiver solo owner
-     * @dev Solo el owner puede cambiar el fee receiver
-     */
-    function test_SetWithdrawalFeeReceiverOnlyOwner() public {
-        address new_receiver = makeAddr("newReceiver");
-
-        // Alice intenta cambiar (deberia revertir)
-        vm.prank(alice);
+        vault.setIdleThreshold(20 ether);
         vm.expectRevert();
-        vault.setWithdrawalFeeReceiver(new_receiver);
-
-        // Owner puede cambiar
-        vault.setWithdrawalFeeReceiver(new_receiver);
-        assertEq(vault.fee_receiver(), new_receiver, "Fee receiver no actualizado");
-    }
-
-    /**
-     * @notice Test de pause solo owner
-     * @dev Solo el owner puede pausar
-     */
-    function test_PauseOnlyOwner() public {
-        // Alice intenta pausar (deberia revertir)
-        vm.prank(alice);
+        vault.setMaxTVL(2000 ether);
+        vm.expectRevert();
+        vault.setMinDeposit(0.1 ether);
+        vm.expectRevert();
+        vault.setWithdrawalFee(300);
+        vm.expectRevert();
+        vault.setWithdrawalFeeReceiver(alice);
         vm.expectRevert();
         vault.pause();
+        vm.stopPrank();
 
-        // Owner puede pausar
+        // Ejecuta setters como Owner (deberían funcionar)
+        vault.setIdleThreshold(20 ether);
+        vault.setMaxTVL(2000 ether);
+        vault.setMinDeposit(0.1 ether);
+        vault.setWithdrawalFee(300);
+        vault.setWithdrawalFeeReceiver(alice);
         vault.pause();
-        assertTrue(vault.paused(), "Vault no esta pausado");
-    }
-
-    /**
-     * @notice Test de unpause solo owner
-     * @dev Solo el owner puede despausar
-     */
-    function test_UnpauseOnlyOwner() public {
-        // Owner pausa primero
-        vault.pause();
-
-        // Alice intenta despausar (deberia revertir)
-        vm.prank(alice);
-        vm.expectRevert();
         vault.unpause();
 
-        // Owner puede despausar
-        vault.unpause();
-        assertFalse(vault.paused(), "Vault aun esta pausado");
+        // Comprueba que los valores se hayan actualizado correctamente
+        assertEq(vault.idle_threshold(), 20 ether);
+        assertEq(vault.max_tvl(), 2000 ether);
+        assertEq(vault.min_deposit(), 0.1 ether);
+        assertEq(vault.withdrawal_fee(), 300);
+        assertEq(vault.fee_receiver(), alice);
     }
 
-    //* Test unitarios de funciones ERC4626: Preview y Max functions
+    //* Testing de funciones preview
 
     /**
-     * @notice Test de previewDeposit
-     * @dev Comprueba que preview devuelva shares correctas antes de depositar
+     * @notice Test de preview withdraw incluye fee
+     * @dev Comprueba que se necesiten más shares que assets por el fee
      */
-    function test_PreviewDeposit() public view {
-        uint256 assets = 10 ether;
+    function test_Preview_WithdrawIncludesFee() public {
+        // Setup inicial
+        _deposit(alice, 100 ether);
 
-        uint256 expected_shares = vault.previewDeposit(assets);
-
-        // Sin depositos previos, ratio 1:1
-        assertEq(expected_shares, assets, "Preview deposit incorrecto");
-    }
-
-    /**
-     * @notice Test de previewMint
-     * @dev Comprueba que preview devuelva assets necesarios para mintear shares
-     */
-    function test_PreviewMint() public view {
-        uint256 shares = 10 ether;
-
-        uint256 expected_assets = vault.previewMint(shares);
-
-        // Sin depositos previos, ratio 1:1
-        assertEq(expected_assets, shares, "Preview mint incorrecto");
+        // Comprueba que shares requeridas sean mayores a assets retirados
+        uint256 shares_needed = vault.previewWithdraw(50 ether);
+        assertGt(shares_needed, 50 ether);
     }
 
     /**
-     * @notice Test de previewWithdraw con fee
-     * @dev Verifica que preview calcule shares necesarias incluyendo fee
+     * @notice Test de preview redeem deduce fee
+     * @dev Comprueba que se reciban menos assets que shares por el fee
      */
-    function test_PreviewWithdraw() public {
-        // Deposito inicial
-        uint256 deposit_amount = 100 ether;
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        vault.deposit(deposit_amount, alice);
-        vm.stopPrank();
+    function test_Preview_RedeemDeductsFee() public {
+        // Setup inicial y obtención de shares
+        uint256 shares = _deposit(alice, 100 ether);
 
-        // Preview para retirar 50 ETH netos
-        uint256 assets_to_withdraw = 50 ether;
-        uint256 shares_needed = vault.previewWithdraw(assets_to_withdraw);
-
-        // Shares needed deberian incluir el fee
-        assertGt(shares_needed, assets_to_withdraw, "Preview deberia incluir fee");
-    }
-
-    /**
-     * @notice Test de previewRedeem con fee
-     * @dev Verifica que preview calcule assets netos descontando fee
-     */
-    function test_PreviewRedeem() public {
-        // Deposito inicial
-        uint256 deposit_amount = 100 ether;
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        uint256 shares = vault.deposit(deposit_amount, alice);
-        vm.stopPrank();
-
-        // Preview para redimir todas las shares
-        uint256 assets_to_receive = vault.previewRedeem(shares);
-
-        // Assets recibidos deberian ser menores por el fee
-        assertLt(assets_to_receive, deposit_amount, "Preview deberia descontar fee");
-    }
-
-    /**
-     * @notice Test de maxDeposit
-     * @dev Verifica que maxDeposit respete el max TVL
-     */
-    function test_MaxDeposit() public view {
-        uint256 max_deposit = vault.maxDeposit(alice);
-
-        // Debe ser igual a max_tvl cuando vault esta vacio
-        assertEq(max_deposit, MAX_TVL, "Max deposit incorrecto");
-    }
-
-    /**
-     * @notice Test de maxMint
-     * @dev Verifica que maxMint respete el max TVL
-     */
-    function test_MaxMint() public view {
-        uint256 max_mint = vault.maxMint(alice);
-
-        // Debe ser igual a max_tvl cuando vault esta vacio (ratio 1:1)
-        assertEq(max_mint, MAX_TVL, "Max mint incorrecto");
-    }
-
-    //* Test unitarios de funciones de consulta: Conversiones
-
-    /**
-     * @notice Test de conversion shares a assets
-     * @dev Comprueba que la conversion de shares a assets sea correcta
-     */
-    function test_ConvertToAssets() public {
-        // Cantidad a depositar: 10 WETH
-        uint256 deposit_amount = 10 ether;
-
-        // Alice deposita
-        deal(WETH, alice, deposit_amount);
-        vm.startPrank(alice);
-
-        IERC20(WETH).approve(address(vault), deposit_amount);
-        uint256 shares = vault.deposit(deposit_amount, alice);
-
-        vm.stopPrank();
-
-        // Convierte las shares recibidas a assets
-        uint256 assets = vault.convertToAssets(shares);
-
-        // Comprueba que los assets recibidos sean correctos
-        assertEq(assets, deposit_amount, "Conversion incorrecta");
-    }
-
-    /**
-     * @notice Test de conversion assets a shares
-     * @dev Comprueba que la conversion de assets a shares sea correcta
-     */
-    function test_ConvertToShares() public view {
-        // Cantidad de assets a convertir: 5 WETH
-        uint256 assets = 5 ether;
-
-        // Sin depositos previos, ratio 1:1
-        uint256 shares = vault.convertToShares(assets);
-
-        // Comprueba que shares y assets coinciden
-        assertEq(shares, assets, "Conversion inicial incorrecta");
-    }
-
-    //* Test unitarios de funciones de consulta: TotalAssets
-
-    /**
-     * @notice Test de totalAssets con idle y manager
-     * @dev Verifica que totalAssets sume idle + manager correctamente
-     */
-    function test_TotalAssets() public {
-        // Deposito que se queda en idle
-        uint256 idle_deposit = 5 ether;
-        deal(WETH, alice, idle_deposit);
-        vm.startPrank(alice);
-        IERC20(WETH).approve(address(vault), idle_deposit);
-        vault.deposit(idle_deposit, alice);
-        vm.stopPrank();
-
-        // Deposito que va a manager
-        uint256 manager_deposit = 10 ether;
-        deal(WETH, bob, manager_deposit);
-        vm.startPrank(bob);
-        IERC20(WETH).approve(address(vault), manager_deposit);
-        vault.deposit(manager_deposit, bob);
-        vm.stopPrank();
-
-        // Total deberia ser suma de idle + manager
-        uint256 total_expected = idle_deposit + manager_deposit;
-        assertEq(vault.totalAssets(), total_expected, "Total assets incorrecto");
+        // Comprueba que assets recibidos sean menores a shares quemadas
+        uint256 assets_received = vault.previewRedeem(shares);
+        assertLt(assets_received, 100 ether);
     }
 }

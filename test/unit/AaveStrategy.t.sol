@@ -32,7 +32,7 @@ contract AaveStrategyTest is Test {
      * @dev Fork de Mainnet para interactuar con Aave v3 real
      */
     function setUp() public {
-        // Crea un fork de Mainnet
+        // Crea un fork de Mainnet usando el endpoint de Alchemy
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
 
         // Inicializa manager (necesario para la estrategia)

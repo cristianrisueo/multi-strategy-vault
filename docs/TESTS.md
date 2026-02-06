@@ -202,7 +202,7 @@ Incluye ghost variables (`ghost_totalDeposited`, `ghost_totalWithdrawn`) para tr
 
 ### Ejecución de Invariant Tests
 
-Los invariant tests generan un volumen de llamadas RPC significativamente mayor que los tests normales (32 runs × 15 depth = 480 secuencias de operaciones). Esto agota rápidamente el rate limit de Alchemy y otros proveedores (HTTP 429).
+Los invariant tests generan un volumen de llamadas RPC significativamente mayor que los tests normales (32 runs × 15 depth = 480 secuencias de operaciones). Esto agota rápidamente el rate limit del free tier de Alchemy y otros proveedores (HTTP 429).
 
 Para solucionarlo, se utiliza un script que lanza **Anvil como proxy local** con rate limiting controlado:
 

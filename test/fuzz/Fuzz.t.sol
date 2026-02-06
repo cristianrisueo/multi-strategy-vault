@@ -34,7 +34,6 @@ contract FuzzTest is Test {
     address public fee_receiver;
 
     /// @notice Parámetros del vault
-    uint256 constant IDLE_THRESHOLD = 10 ether;
     uint256 constant MAX_TVL = 1000 ether;
     uint256 constant MIN_DEPOSIT = 0.01 ether;
     uint256 constant WITHDRAWAL_FEE = 200;
@@ -54,7 +53,7 @@ contract FuzzTest is Test {
 
         // Despliega y conecta vault y manager
         manager = new StrategyManager(WETH);
-        vault = new StrategyVault(WETH, address(manager), fee_receiver, IDLE_THRESHOLD);
+        vault = new StrategyVault(WETH, address(manager), fee_receiver);
         manager.initializeVault(address(vault));
 
         // Despliega estrategias con direcciones reales de Mainnet

@@ -18,7 +18,7 @@ import {CompoundStrategy} from "../src/strategies/CompoundStrategy.sol";
  *   1. StrategyManager   — necesita address mainnet de WETH
  *   2. AaveStrategy      — necesita address mainnet de manager, WETH, Aave Pool
  *   3. CompoundStrategy  — necesita address mainnet de manager, WETH, Compound Comet
- *   4. StrategyVault     — necesita address mainnet de: WETH, manager, fee_receiver y el idle_threshold
+ *   4. StrategyVault     — necesita address mainnet de: WETH, manager y fee_receiver
  *   5. manager.initializeVault(vault)   — resuelve dependencia circular. Setea el vault como owner de manager
  *   6. manager.addStrategy(aave)        — registra Aave
  *   7. manager.addStrategy(compound)    — registra Compound
@@ -40,11 +40,6 @@ contract Deploy is Script {
 
     /// @notice Compound v3 Comet (WETH market)
     address constant COMPOUND_COMET = 0xA17581A9E3356d9A858b789D68B4d866e593aE94;
-
-    //* Parámetros del protocolo
-
-    /// @notice Umbral de idle buffer: WETH se acumula hasta este valor antes de enviar a estrategias
-    uint256 constant IDLE_THRESHOLD = 10 ether;
 
     //* Entry point
 
@@ -79,7 +74,7 @@ contract Deploy is Script {
         console.log("CompoundStrategy:", address(compound_strategy));
 
         // 4. StrategyVault: vault ERC4626, deployer como fee_receiver
-        StrategyVault vault = new StrategyVault(WETH, address(manager), deployer, IDLE_THRESHOLD);
+        StrategyVault vault = new StrategyVault(WETH, address(manager), deployer);
         console.log("StrategyVault:", address(vault));
 
         // 5. Resuelve dependencia circular: Manager ahora tiene el address del vault como "owner/invoker"

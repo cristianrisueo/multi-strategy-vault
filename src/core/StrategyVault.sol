@@ -145,15 +145,14 @@ contract StrategyVault is ERC4626, Ownable, Pausable {
      * @param _asset Direccion del token subyacente (WETH)
      * @param _strategy_manager Direccion del StrategyManager
      * @param _fee_receiver Direccion del receiver de las protocol fees
-     * @param _idle_threshold Threshold inicial para auto-allocate (ej: 10 ether)
      */
-    constructor(address _asset, address _strategy_manager, address _fee_receiver, uint256 _idle_threshold)
+    constructor(address _asset, address _strategy_manager, address _fee_receiver)
         ERC4626(IERC20(_asset))
         ERC20("Multi-Strategy Vault WETH", "msvWETH")
         Ownable(msg.sender)
     {
         strategy_manager = StrategyManager(_strategy_manager);
-        idle_threshold = _idle_threshold;
+        idle_threshold = 10 ether;
         max_tvl = 1000 ether;
         min_deposit = 0.01 ether;
         fee_receiver = _fee_receiver;

@@ -34,7 +34,6 @@ contract StrategyVaultTest is Test {
     address public fee_receiver;
 
     /// @notice Parámetros del vault
-    uint256 constant IDLE_THRESHOLD = 10 ether;
     uint256 constant MAX_TVL = 1000 ether;
     uint256 constant WITHDRAWAL_FEE = 200;
 
@@ -54,7 +53,7 @@ contract StrategyVaultTest is Test {
 
         // Inicializa el manager, vault y setea el address del vault en el manager
         manager = new StrategyManager(WETH);
-        vault = new StrategyVault(WETH, address(manager), fee_receiver, IDLE_THRESHOLD);
+        vault = new StrategyVault(WETH, address(manager), fee_receiver);
         manager.initializeVault(address(vault));
 
         // Inicializa las estrategias con las direcciones reales de mainnet
@@ -123,7 +122,7 @@ contract StrategyVaultTest is Test {
      */
     function test_Deposit_TriggersAllocation() public {
         // Usa a alice para depositar cantidad límite
-        _deposit(alice, IDLE_THRESHOLD);
+        _deposit(alice, vault.idle_threshold());
 
         // Comprueba que tanto el vault cómo el buffer IDLE no tiene WETH
         assertEq(vault.idle_weth(), 0);

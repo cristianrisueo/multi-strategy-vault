@@ -32,9 +32,6 @@ contract StrategyManagerTest is Test {
     address public alice = makeAddr("alice");
     address public fee_receiver;
 
-    /// @notice Parámetros del vault
-    uint256 constant IDLE_THRESHOLD = 10 ether;
-
     //* Setup del entorno de testing
 
     /**
@@ -50,7 +47,7 @@ contract StrategyManagerTest is Test {
 
         // Inicializa el manager y vault
         manager = new StrategyManager(WETH);
-        vault = new StrategyVault(WETH, address(manager), fee_receiver, IDLE_THRESHOLD);
+        vault = new StrategyVault(WETH, address(manager), fee_receiver);
         manager.initializeVault(address(vault));
 
         // Inicializa las estrategias

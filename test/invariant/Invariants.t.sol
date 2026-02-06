@@ -36,9 +36,6 @@ contract InvariantsTest is Test {
     /// @notice Lista de usuarios simulados
     address[] public actors;
 
-    /// @notice Parámetros del vault
-    uint256 constant IDLE_THRESHOLD = 10 ether;
-
     //* Setup del entorno de testing
 
     /**
@@ -54,7 +51,7 @@ contract InvariantsTest is Test {
 
         // Despliega y conecta vault y manager
         manager = new StrategyManager(WETH);
-        vault = new StrategyVault(WETH, address(manager), fee_receiver, IDLE_THRESHOLD);
+        vault = new StrategyVault(WETH, address(manager), fee_receiver);
         manager.initializeVault(address(vault));
 
         // Despliega estrategias con direcciones reales de Mainnet

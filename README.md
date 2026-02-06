@@ -67,8 +67,15 @@ multi-strategy-vault/
 │   └── interfaces/
 │       ├── IStrategy.sol           # Interfaz estándar de estrategias
 │       └── IComet.sol              # Interfaz custom Compound v3
-├── lib/                            # Dependencias (OpenZeppelin, Aave)
+├── test/
+│   ├── unit/                       # Tests unitarios por contrato (61 tests)
+│   ├── integration/                # Tests E2E del protocolo (6 tests)
+│   ├── fuzz/                       # Fuzz tests stateless (5 tests)
+│   └── invariant/                  # Invariant tests stateful (3 invariantes)
+├── script/
+│   └── run_invariants_offline.sh   # Script para ejecutar invariant tests vía Anvil
 ├── docs/                           # Documentación técnica detallada
+├── lib/                            # Dependencias (OpenZeppelin, Aave)
 ├── foundry.toml                    # Configuración de Foundry
 └── README.md                       # Este archivo
 ```
@@ -81,21 +88,32 @@ La documentación técnica completa está organizada en los siguientes archivos:
 - **[CONTRACTS.md](docs/CONTRACTS.md)**: Documentación detallada de cada contrato, variables de estado, funciones y eventos
 - **[FLOWS.md](docs/FLOWS.md)**: Flujos de usuario paso a paso (deposit, withdraw, rebalance, idle allocation)
 - **[SECURITY.md](docs/SECURITY.md)**: Consideraciones de seguridad, vectores de ataque, protecciones implementadas y limitaciones conocidas
+- **[TESTS.md](docs/TESTS.md)**: Suite de tests completa, coverage por contrato, estructura de ficheros y particularidades de ejecución
 
 ## Testing
 
-```bash
-# Ejecutar todos los tests
-forge test
+75 tests ejecutados contra fork de Ethereum Mainnet real (sin mocks). Ver **[TESTS.md](docs/TESTS.md)** para documentación detallada.
 
-# Tests con verbosidad
-forge test -vvv
+```bash
+# Configurar RPC
+export MAINNET_RPC_URL="https://eth-mainnet.g.alchemy.com/v2/<API_KEY>"
+
+# Ejecutar unit + integration + fuzz (72 tests)
+forge test -vv
+
+# Ejecutar invariant tests vía Anvil (3 invariantes)
+./script/run_invariants_offline.sh
 
 # Coverage
 forge coverage
 ```
 
-> **Nota**: Los tests están pendientes de implementación
+| Capa | Tests | Ficheros |
+|------|-------|----------|
+| Unit | 61 | `test/unit/*.t.sol` |
+| Integration | 6 | `test/integration/FullFlow.t.sol` |
+| Fuzz | 5 | `test/fuzz/Fuzz.t.sol` |
+| Invariant | 3 | `test/invariant/Invariants.t.sol` |
 
 ## Deployment
 

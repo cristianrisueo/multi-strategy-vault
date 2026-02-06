@@ -10,6 +10,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title FullFlowTest
+ * @author cristianrisueo
  * @notice Tests de integración end-to-end para el protocolo completo
  * @dev Fork de Mainnet real - valida flujos que cruzan vault → manager → strategies → protocolos
  */

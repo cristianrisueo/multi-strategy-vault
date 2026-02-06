@@ -10,6 +10,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title StrategyVaultTest
+ * @author cristianrisueo
  * @notice Tests unitarios para StrategyVault con fork de Mainnet
  * @dev Fork test de mainnet, aquí no hay mierdas
  */

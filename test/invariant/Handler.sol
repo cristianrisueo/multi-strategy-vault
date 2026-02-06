@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title Handler
+ * @author cristianrisueo
  * @notice Contrato intermediario que acota las llamadas al vault para invariant testing
  * @dev Sin un handler, Foundry llamaría funciones con inputs inválidos y perdería
  *      el 99% del tiempo en reverts inútiles. El handler garantiza que las llamadas

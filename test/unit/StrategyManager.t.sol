@@ -10,6 +10,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title StrategyManagerTest
+ * @author cristianrisueo
  * @notice Tests unitarios para StrategyManager con fork de Mainnet
  * @dev Fork test real - valida allocation, withdrawals y rebalancing
  */

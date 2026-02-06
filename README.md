@@ -73,6 +73,7 @@ multi-strategy-vault/
 │   ├── fuzz/                       # Fuzz tests stateless (5 tests)
 │   └── invariant/                  # Invariant tests stateful (3 invariantes)
 ├── script/
+│   ├── Deploy.s.sol                # Script de despliegue en Mainnet
 │   └── run_invariants_offline.sh   # Script para ejecutar invariant tests vía Anvil
 ├── docs/                           # Documentación técnica detallada
 ├── lib/                            # Dependencias (OpenZeppelin, Aave)
@@ -117,14 +118,21 @@ forge coverage
 
 ## Deployment
 
-El protocolo está diseñado para desplegarse en Sepolia testnet.
+El protocolo se despliega en Ethereum Mainnet. El script detecta automáticamente las direcciones de WETH, Aave v3 Pool y Compound v3 Comet.
 
 ```bash
-# Deployment script (pendiente)
-forge script script/Deploy.s.sol --rpc-url sepolia --broadcast
+# Configurar private key del deployer
+export PRIVATE_KEY="0x..."
+export MAINNET_RPC_URL="https://eth-mainnet.g.alchemy.com/v2/<API_KEY>"
+
+# Dry-run (simula sin ejecutar)
+forge script script/Deploy.s.sol --rpc-url $MAINNET_RPC_URL -vvv
+
+# Deploy real
+forge script script/Deploy.s.sol --rpc-url $MAINNET_RPC_URL --broadcast --verify
 ```
 
-> **Nota**: Scripts de deployment están pendientes de implementación
+El deployer queda como owner y fee_receiver. Coste estimado: ~0.008 ETH.
 
 ## Parámetros del Protocolo
 
@@ -163,6 +171,6 @@ MIT License - Ver [LICENSE](LICENSE) para más detalles
 
 **Autor**: @cristianrisueo
 **Versión**: 1.0.0
-**Target Network**: Sepolia Testnet
+**Target Network**: Ethereum Mainnet
 **Solidity**: 0.8.33
 **Framework**: Foundry

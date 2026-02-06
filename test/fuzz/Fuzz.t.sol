@@ -10,6 +10,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title FuzzTest
+ * @author cristianrisueo
  * @notice Fuzz tests stateless para el protocolo
  * @dev Cada test recibe inputs aleatorios acotados a rangos realistas
  *      Son stateless: cada ejecución empieza de cero tras setUp()

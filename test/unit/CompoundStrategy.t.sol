@@ -8,6 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title CompoundStrategyTest
+ * @author cristianrisueo
  * @notice Tests unitarios para CompoundStrategy con fork de Mainnet
  * @dev Fork test real contra Compound v3 - valida deposits, withdrawals y APY
  */

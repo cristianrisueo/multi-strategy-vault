@@ -11,6 +11,7 @@ import {Handler} from "./Handler.sol";
 
 /**
  * @title InvariantsTest
+ * @author cristianrisueo
  * @notice Invariant tests stateful para el protocolo
  * @dev A diferencia de fuzz tests, aquí Foundry ejecuta secuencias ALEATORIAS de llamadas
  *      al Handler (deposit, withdraw, deposit, withdraw...) y tras cada secuencia verifica

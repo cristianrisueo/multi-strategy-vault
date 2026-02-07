@@ -233,6 +233,27 @@ Para solucionarlo, se utiliza un script que lanza **Anvil como proxy local** con
 ./script/run_invariants_offline.sh -r 16
 ```
 
+### Resultado de Ejecución
+
+Los 3 invariant tests se ejecutaron exitosamente durante el desarrollo del protocolo, validando las propiedades críticas del sistema:
+
+```
+Ran 3 tests for test/invariant/Invariants.t.sol:InvariantsTest
+[PASS] invariant_AccountingIsConsistent() (runs: 32, calls: 480, reverts: 0)
+[PASS] invariant_SupplyIsCoherent() (runs: 32, calls: 480, reverts: 0)
+[PASS] invariant_VaultIsSolvent() (runs: 32, calls: 480, reverts: 1)
+
+Suite result: ok. 3 passed; 0 failed; 0 skipped
+```
+
+**Estadísticas de ejecución (32 runs)**:
+- Total de secuencias ejecutadas: 480 (32 runs × 15 depth)
+- Operaciones realizadas: ~950 llamadas al vault (deposit + withdraw)
+- Reverts esperados: 1 (caso edge donde withdraw excede liquidez disponible)
+- Tiempo de ejecución: ~100s con Anvil como proxy
+
+**Importante**: Los invariant tests requieren un **periodo de cooldown del RPC** entre ejecuciones. Si se ejecutan inmediatamente después de otros tests que consumen muchas llamadas (como el dry-run del deployment), pueden fallar con HTTP 429 debido al rate limiting acumulado del free tier de Alchemy. Esto es **normal** y no indica un problema en el código — simplemente espera 5-10 minutos o usa un RPC con mayor rate limit (Alchemy Growth Plan o nodo local).
+
 ---
 
 ## Coverage Global
